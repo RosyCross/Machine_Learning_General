@@ -21,8 +21,6 @@ ref_box_width = 8
 ref_box = np.array([[0,0],[0,ref_box_width],[ref_box_width,ref_box_width],[ref_box_width,0]])
 ll,ul,ur,lr = ref_box
 #ref_box_edges = np.array([0,ref_box_width],[ref_box_width,0],[0,-ref_box_width],[-ref_box_width,0])
-
-#ref_box_edges = np.array([])
 ref_box_edges = np.empty((0,2,2), dtype=int)
 for idx, idy in zip(range(0,num_points,1),range(1,num_points+1,1)):
     print("idx {}, idy {}".format(idx,idy))
@@ -36,9 +34,7 @@ y_fake_max = 30
 x_zoom_factor = x_fake_max / x_ref_max
 y_zoom_factor = y_fake_max / y_ref_max
 
-def genBatchTrainData(num_output=10, dist_start=-40, dist_end=40, rate=0.05):
-    #minSpacing = 9    
-    #box = np.array([[0,0],[0,8],[8,8],[8,0]])
+def genBatchTrainData(dist_start=-40, dist_end=40, rate=0.05):
     #ll,ul,ur,lr = ref_box;    
     train_x = []
     train_y = []
@@ -48,31 +44,23 @@ def genBatchTrainData(num_output=10, dist_start=-40, dist_end=40, rate=0.05):
         ref_points_on_edge = [edge[0], edge[1], edge[0]/2 + edge[1]/2];
         for point_on_edge in ref_points_on_edge:
             #for distance in np.arange(-50,50,0.1):
-            for distance in np.arange(dist_start,dist_end,rate):
-                anchor_point = point_on_edge + np.array([distance,0]);
+            for distance in np.arange(dist_start,dist_end,rate):                
+                ##anchor_point = point_on_edge + np.array([distance,0]);
+                tmp_vec = np.array([distance,0]) if edge[0][0] == edge[1][0] else np.array([0,distance])
+                anchor_point = point_on_edge + tmp_vec;
                 tmp_vec = anchor_point - edge[0];
                 is_outside = ( edge_vec[0]*tmp_vec[1] - edge_vec[1]*tmp_vec[0]) > 0
                 if is_outside:
                     is_drc_vio = abs(distance) < min_spacing
-                    #print("outside, {} -- {} --- dist:{}".format(edge, anchor_point, distance))
+                #    print("outside, {} -- {} --- dist:{}".format(edge, anchor_point, distance))
                 else:
                     is_drc_vio = abs(distance) < (min_spacing + ref_box_width)                    
-                    #print("not outside, {} -- {} --- dist:{}".format( edge, anchor_point, distance))
-                #is_drc_vio = abs(distance) < minSpacing
-                #anchor_point = ul + np.array([distance,0]);
-                
+                #    print("not outside, {} -- {} --- dist:{}".format( edge, anchor_point, distance))
+                                
                 one_shot = []
-    
-                #train_x.append(anchor_point - ll);
                 one_shot.append(anchor_point - ll) 
-                ##train_y.append(int(is_drc_vio))
-                #train_x.append(anchor_point - ul);
-                one_shot.append(anchor_point - ul);            
-                ##train_y.append(int(is_drc_vio))
-                #train_x.append(anchor_point - rr);
-                one_shot.append(anchor_point - ur);
-                ##train_y.append(int(is_drc_vio))
-                #train_x.append(anchor_point - lr);
+                one_shot.append(anchor_point - ul);                            
+                one_shot.append(anchor_point - ur);                
                 one_shot.append(anchor_point - lr);
                 train_y.append(int(is_drc_vio))     
                 train_x.append(one_shot)
@@ -83,8 +71,6 @@ def genBatchTrainData(num_output=10, dist_start=-40, dist_end=40, rate=0.05):
 """
 construct training , test data
 """
-#train_x, train_y = genBatchTrainData();
-#print(train_x)
 x_train, y_train = genBatchTrainData();
 shuffled_ix = np.random.permutation(np.arange(len(x_train)))        
 x_train = np.array(x_train)[shuffled_ix]
@@ -96,6 +82,24 @@ if len(x_train) - x_cutoff < 10:
 x_train, x_test = x_train[:x_cutoff], x_train[x_cutoff:]
 y_train, y_test = y_train[:x_cutoff], y_train[x_cutoff:]
 
+"""
+must be trained point, try to increase the steepness at the boundary of min spacing
+"""
+x_must, y_must = genBatchTrainData(dist_start=-min_spacing, dist_end=-min_spacing+1, rate=1)
+x_must = np.array(x_must)
+y_must = np.array(y_must)
+#x_train = np.vstack((x_train, x_must))
+#y_train = np.vstack((y_train, y_must))
+x_train = np.concatenate((x_train, x_must))
+y_train = np.concatenate((y_train, y_must))
+
+x_must, y_must = genBatchTrainData(dist_start=min_spacing, dist_end=min_spacing+1, rate=1)
+x_must = np.array(x_must)
+y_must = np.array(y_must)
+#np.vstack([x_train, x_must])
+#np.vstack([y_train, y_must])
+x_train = np.concatenate((x_train, x_must))
+y_train = np.concatenate((y_train, y_must))
 
 
 """
@@ -120,7 +124,6 @@ cell   = tf.nn.rnn_cell.BasicRNNCell(num_units = rnn_size)
 print("cell state_size: ",cell.state_size)
 
 output, state = tf.nn.dynamic_rnn(cell, x_data, dtype=tf.float32)
-#h0 = cell.zero_state(10, np.float32)
 #output, state = tf.nn.dynamic_rnn(cell, x_data, initial_state=h0)
 # parameters are variables, waiting for constant later.
 output = tf.nn.dropout(output, dropout_keep_prob)
@@ -137,7 +140,7 @@ print("weight shape: ", weight.get_shape())
 bias   = tf.Variable(tf.constant(0.1, shape=[2]))
 logits_out = tf.nn.softmax(tf.matmul(last, weight) + bias)
 print("logits_out shape: ", logits_out.get_shape())
-my_test_output = tf.matmul(last, weight) + bias
+#my_test_output = tf.matmul(last, weight) + bias
 
 ########## Loss function
 # logits=float32, labels=int32
@@ -150,16 +153,13 @@ accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(logits_out, 1), tf.cast(y_o
 
 optimizer  = tf.train.RMSPropOptimizer(learning_rate)
 train_step = optimizer.minimize(loss)
-
 #optimizer = tf.train.GradientDescentOptimizer(0.005)
 #train_step = optimizer.minimize(loss)
 
 ###############################################################################
 ###############################################################################
 epochs = 100
-#sess = tf.Session()
 init = tf.initialize_all_variables()
-#sess.run(init)
 
 train_loss     = []
 test_loss      = []
@@ -219,7 +219,7 @@ with tf.Session() as sess:
     #y_check = y_train[check_shuffled_ix[190:200]]
     #x_check, y_check = genCheckData()
     ###x_check, y_check = genBatchTrainData(batch_size=10, dist_start=-11,dist_end=-1,rate=1)
-    x_check, y_check = genBatchTrainData(num_output=10, dist_start=10,dist_end=20,rate=1)
+    x_check, y_check = genBatchTrainData(dist_start=10,dist_end=20,rate=1)
     x_check = np.array(x_check)[:batch_size]
     y_check = np.array(y_check)[:batch_size]
     #x_check = x_check/x_zoom_factor
