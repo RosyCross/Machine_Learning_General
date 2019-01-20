@@ -5,6 +5,7 @@ Created on Mon Jan  7 23:57:58 2019
 
 """
 
+import sys
 import tensorflow as tf
 import numpy as np
 
@@ -13,17 +14,20 @@ must be used if you want to rerun with IDE
 """
 tf.reset_default_graph()
 
+
+    
 """
 Auxiliary functions
 """
-num_points = 4;
+
 ref_box_width = 8
 ref_box = np.array([[0,0],[0,ref_box_width],[ref_box_width,ref_box_width],[ref_box_width,0]])
 ll,ul,ur,lr = ref_box
+num_points = len(ref_box);
 #ref_box_edges = np.array([0,ref_box_width],[ref_box_width,0],[0,-ref_box_width],[-ref_box_width,0])
 ref_box_edges = np.empty((0,2,2), dtype=int)
 for idx, idy in zip(range(0,num_points,1),range(1,num_points+1,1)):
-    print("idx {}, idy {}".format(idx,idy))
+    ##print("idx {}, idy {}".format(idx,idy))
     ref_box_edges = np.append(ref_box_edges, [[ref_box[idx % num_points], ref_box[idy % num_points]]], axis=0 )
 
 min_spacing = 9
@@ -33,6 +37,46 @@ x_fake_max = 30
 y_fake_max = 30
 x_zoom_factor = x_fake_max / x_ref_max
 y_zoom_factor = y_fake_max / y_ref_max
+
+
+def genCheckingVectors(anchor_point, ref_box):      
+    checking_vectors = np.empty([0,2])
+    for ccw_point in ref_box:
+        print(anchor_point-ccw_point)
+        checking_vectors = np.append(checking_vectors,[anchor_point-ccw_point], axis=0)    
+    return checking_vectors;
+
+print( genCheckingVectors(np.array([10, 0]), ref_box))        
+ 
+#os.sep
+delimiter = '/' if sys.platform == 'win32' else '\\'
+model_name = 'rnn_coordinate_vector_model'
+model_dir = '.' + delimiter + 'rnn_coordinate_vector_model' + delimiter    
+#model_param_file_full_path = './' + model_name
+model_file_full_path = model_dir + model_name + '.meta'
+def loadModel(model_file_full_path):
+    with tf.Session() as sess: 
+        """ Loading model data"""
+        new_saver = tf.train.import_meta_graph(model_file_full_path) 
+        new_saver.restore(sess, tf.train.latest_checkpoint(model_dir))
+        
+        graph = tf.get_default_graph()
+        op_logits_output = graph.get_tensor_by_name("logits_out:0")        
+        #x_input = graph.get_tensor_by_name("x_data:0")        
+        #y_data = graph.get_tensor_by_name("y_output:0")
+        #x_data   = tf.placeholder(tf.float32, [None, 4, 2])
+        x_input = np.array([genCheckingVectors(np.array([10.0, 0]), ref_box)])
+        x_input = x_input.astype(np.float32)
+        y_data = np.array([1])
+        #check_dict = {x_data:x_input, y_output:y_data, dropout_keep_prob:1.0}
+        check_dict = {'x_data:0':x_input, 'y_output:0':y_data, 'dropout_keep_prob:0':1.0}
+        print(sess.run(op_logits_output, feed_dict=check_dict))
+        
+"for testing"
+loadModel(model_file_full_path)
+if True: sys.exit()   
+
+
 
 def genBatchTrainData(dist_start=-40, dist_end=40, rate=0.05):
     #ll,ul,ur,lr = ref_box;    
@@ -114,9 +158,9 @@ rnn_size = 4; #rnn_states
 learning_rate = 0.0005
 
 ###############################
-x_data   = tf.placeholder(tf.float32, [None, sequence_length, input_size])
-y_output = tf.placeholder(tf.int32, [None])
-dropout_keep_prob = tf.placeholder(tf.float32)
+x_data   = tf.placeholder(tf.float32, [None, sequence_length, input_size], name="x_data")
+y_output = tf.placeholder(tf.int32, [None], name="y_output")
+dropout_keep_prob = tf.placeholder(tf.float32, name="dropout_keep_prob")
 #h0 = cell.zero_state(32, np.float32)
 
 # Define the RNN cell
@@ -138,7 +182,7 @@ print("last shape: ", last.get_shape())
 weight = tf.Variable(tf.truncated_normal([rnn_size, 2], stddev=0.1))
 print("weight shape: ", weight.get_shape())
 bias   = tf.Variable(tf.constant(0.1, shape=[2]))
-logits_out = tf.nn.softmax(tf.matmul(last, weight) + bias)
+logits_out = tf.nn.softmax(tf.matmul(last, weight) + bias, name="logits_out")
 print("logits_out shape: ", logits_out.get_shape())
 #my_test_output = tf.matmul(last, weight) + bias
 
@@ -213,7 +257,10 @@ with tf.Session() as sess:
         test_loss.append(temp_test_loss)
         test_accuracy.append(temp_test_acc)
         print('Epoch: {}, Test Loss: {:.2}, Test Acc: {:.2}'.format(epoch+1, temp_test_loss, temp_test_acc))
-    
+        
+        
+    saver = tf.train.Saver();
+    saver.save(sess, './rnn_coordinate_vector_model')
     #check_shuffled_ix = np.random.permutation(np.arange(len(x_train)))
     #x_check = x_train[check_shuffled_ix[190:200]]
     #y_check = y_train[check_shuffled_ix[190:200]]
